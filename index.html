@@ -70,7 +70,13 @@
       color:#120900;border:0;border-radius:12px;padding:12px 16px;
       font-weight:800;letter-spacing:.3px;cursor:pointer;box-shadow:0 6px 24px rgba(255,122,0,.35)
     }
-    .list{margin:10px 0 0 0;padding-left:18px;font-size:14px;opacity:.94}
+    /* Larger Play button */
+    #startBtn{
+      font-size:clamp(18px,2.6vw,22px);
+      padding:16px 28px;
+      border-radius:14px;
+    }
+
     .badge{margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#16181f;border:1px solid rgba(255,122,0,.28);font-size:12px}
     .brand{display:flex;align-items:center;gap:10px;margin-bottom:8px}
     .logo{width:54px;height:54px;border-radius:50%;position:relative;display:inline-block;background:radial-gradient(circle at 30% 30%,#ffd69f 0%, #ffb157 28%, #ff8a1c 58%, #ff7a00 75%, #e86d00 100%);box-shadow:0 6px 28px rgba(255,122,0,.45), inset 0 0 12px rgba(255,255,255,.2)}
@@ -131,7 +137,7 @@
         0 0 36px rgba(255,122,0,.5);
     }
 
-    /* Power-up blurb styling on start UI */
+    /* Power-up blurbs */
     .pu-list{margin:14px 0 0 0;display:grid;gap:10px}
     .pu-row{
       display:flex;align-items:center;gap:12px;
@@ -156,7 +162,6 @@
     /* D-Pad (position and sizing controlled by JS via CSS vars) */
     #dpad{
       position:absolute;z-index:4;
-      /* Centering and top are set in JS */
       background:linear-gradient(180deg, rgba(6,7,10,0.85) 0%, rgba(9,10,15,0.85) 100%);
       border:1px solid rgba(255,122,0,.15);
       border-radius:16px;
@@ -274,7 +279,7 @@
       </div>
     </div>
 
-    <!-- D-Pad controls (positioned via JS just beneath the maze) -->
+    <!-- D-Pad controls (positioned via JS directly under the maze) -->
     <div id="dpad" aria-label="Directional controls">
       <div class="pad">
         <div class="dpad-empty"></div>
@@ -300,9 +305,9 @@
     const ROWS = 25;
     const MAX_LEVEL = 50;
     // Slower speeds for finer control
-    const PLAYER_SPEED_TPS = 5.2;   // was 7.0
-    const ENEMY_SPEED_TPS  = 4.8;   // was 6.2
-    const ENEMY_IDLE_SPEED = 1.6;   // was 2.2
+    const PLAYER_SPEED_TPS = 5.2;
+    const ENEMY_SPEED_TPS  = 4.8;
+    const ENEMY_IDLE_SPEED = 1.6;
     const TILE_ASPECT_MARGIN = 0.96;
 
     // DOM
@@ -314,12 +319,34 @@
     const hudStatus = document.getElementById('hudStatus');
     const centerText= document.getElementById('centerText');
     const dpad = document.getElementById('dpad');
-    const pad = dpad.querySelector('.pad');
 
     const startOverlay = document.getElementById('startOverlay');
     const endOverlay   = document.getElementById('endOverlay');
     const gameOverOverlay = document.getElementById('gameOverOverlay');
 
+    // Game State
+    let level=1, currentSeed=1, running=false, lastTime=performance.now();
+    let world=null, player=null, enemies=[], dotsLeft=0, openTiles=[];
+    let desiredDir = {x:0,y:0};
+    let hasMoved=false;
+
+    // Timers and particles
+    let animT = 0;
+    let lastCommandMs = performance.now();
+    let freezeTimer = 0;     // 11s
+    let invulnTimer = 0;     // 12s
+    let frenzyTimer = 0;     // 10s
+    let freezeFlakes = [];
+    let ghostMotes = [];
+
+    // Utilities
+    const DIRS = { up:{x:0,y:-1}, down:{x:0,y:1}, left:{x:-1,y:0}, right:{x:1,y:0} };
+    const dirList = [DIRS.up, DIRS.left, DIRS.down, DIRS.right];
+    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+    function makeRand(seed){ let s = seed>>>0; return () => (s=(s*1664525+1013904223)>>>0, s/4294967296); }
+    function lerp(a,b,t){return a+(b-a)*t;}
+
+    // Start/Restart hooks
     document.getElementById('startBtn').onclick = () => { startOverlay.classList.add('hidden'); startGame(); };
     document.getElementById('retryBtn').onclick = () => { gameOverOverlay.classList.add('hidden'); restartSameLevel(); };
     document.getElementById('changeMazeBtn').onclick = () => { gameOverOverlay.classList.add('hidden'); changeMazeSameLevel(); };
@@ -332,47 +359,57 @@
       startOverlay.classList.remove('hidden');
     }
 
-    // Compute D-Pad responsive sizing
+    // Compute big D-Pad size that still fits viewport width
     function computeDpadSize(){
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      // Button size aims to be big on both mobile and desktop (including mobile emulation)
-      const btn = Math.floor(Math.max(96, Math.min(160, Math.min(vw, vh)*0.18)));
-      const gap = Math.max(12, Math.floor(btn*0.12));     // spacing between buttons
-      const fs  = Math.floor(btn*0.28);                   // icon text size
-      const padW = btn*3 + gap*2;
-      const padH = btn*3 + gap*2;
+      let btn = Math.max(96, Math.min(160, Math.min(vw, vh)*0.18));
+      let gap = Math.max(12, Math.floor(btn*0.12));
+      let fs  = Math.floor(btn*0.28);
+      let padW = btn*3 + gap*2;
+      let padH = btn*3 + gap*2;
+
+      // If too wide for viewport, scale down proportionally (keep buttons big but fitting)
+      const maxW = vw - 16;
+      if(padW > maxW){
+        const s = maxW / padW;
+        btn = Math.max(72, Math.floor(btn*s));
+        gap = Math.max(10, Math.floor(gap*s));
+        fs  = Math.max(24, Math.floor(fs*s));
+        padW = btn*3 + gap*2;
+        padH = btn*3 + gap*2;
+      }
       return {btn, gap, fs, padW, padH};
     }
 
     // Responsive canvas and D-Pad placement
     let TILE = 24;
     function resizeCanvas(){
-      // Size D-Pad first to reserve room for it
       const sz = computeDpadSize();
-      // Reserve space below maze so D-Pad fits right under it
-      const reserveH = sz.padH + 16; // 16px breathing room
+      // Reserve room below maze for D-Pad so it sits right under the bottom wall
+      const reserveH = sz.padH + 16; // breathing room
       const w = window.innerWidth;
-      const hAvail = Math.max(240, window.innerHeight - reserveH);
+      const hAvail = Math.max(260, window.innerHeight - reserveH);
       const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
       const tileH = Math.floor((hAvail * TILE_ASPECT_MARGIN) / ROWS);
       TILE = Math.max(10, Math.min(tileW, tileH));
+
       canvas.width = COLS * TILE;
       canvas.height= ROWS * TILE;
-      // Center canvas at top area (above D-Pad)
+
       const top = Math.max(0, Math.floor((hAvail - canvas.height)/2));
       const left = Math.floor((w - canvas.width)/2);
       canvas.style.top  = `${top}px`;
       canvas.style.left = `${left}px`;
 
-      // Apply D-Pad size via CSS vars
+      // Apply D-Pad CSS sizes
       dpad.style.setProperty('--btn', `${sz.btn}px`);
       dpad.style.setProperty('--gap', `${sz.gap}px`);
       dpad.style.setProperty('--pad-w', `${sz.padW}px`);
       dpad.style.setProperty('--pad-h', `${sz.padH}px`);
       dpad.style.setProperty('--fs', `${sz.fs}px`);
 
-      // Position D-Pad directly below maze bottom boundary wall
+      // Position D-Pad directly below the maze's bottom boundary wall, centered
       const margin = Math.max(6, Math.floor(TILE*0.25));
       const dpadTop = top + canvas.height + margin;
       const dpadLeft = Math.max(8, Math.floor((w - sz.padW)/2));
@@ -380,28 +417,38 @@
       dpad.style.left= `${dpadLeft}px`;
     }
     window.addEventListener('resize', resizeCanvas, {passive:true});
+    window.addEventListener('orientationchange', resizeCanvas);
+    if(window.visualViewport){
+      window.visualViewport.addEventListener('resize', resizeCanvas, {passive:true});
+    }
     resizeCanvas();
 
-    // Utilities
-    const DIRS = { up:{x:0,y:-1}, down:{x:0,y:1}, left:{x:-1,y:0}, right:{x:1,y:0} };
-    const dirList = [DIRS.up, DIRS.left, DIRS.down, DIRS.right];
-    function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
-    function makeRand(seed){ let s = seed>>>0; return () => (s=(s*1664525+1013904223)>>>0, s/4294967296); }
-    function lerp(a,b,t){return a+(b-a)*t;}
+    // Input: Keyboard + On-screen D-Pad
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key.toLowerCase();
+      if(['arrowup','w'].includes(k)) desiredDir = DIRS.up;
+      else if(['arrowdown','s'].includes(k)) desiredDir = DIRS.down;
+      else if(['arrowleft','a'].includes(k)) desiredDir = DIRS.left;
+      else if(['arrowright','d'].includes(k)) desiredDir = DIRS.right;
+      lastCommandMs = performance.now();
+    });
 
-    // Animation timers and power-ups
-    let animT = 0;
-    let lastCommandMs = performance.now();
-    let freezeTimer = 0;     // 11s
-    let invulnTimer = 0;     // 12s
-    let frenzyTimer = 0;     // 10s
+    function setDirFromButton(dir){
+      if(dir==='up') desiredDir = DIRS.up;
+      if(dir==='down') desiredDir = DIRS.down;
+      if(dir==='left') desiredDir = DIRS.left;
+      if(dir==='right') desiredDir = DIRS.right;
+      lastCommandMs = performance.now();
+    }
+    document.querySelectorAll('.dpad-btn').forEach(btn=>{
+      const dir = btn.getAttribute('data-dir');
+      const handler = (e)=>{ e.preventDefault(); setDirFromButton(dir); };
+      btn.addEventListener('pointerdown', handler);
+      btn.addEventListener('click', handler);
+      btn.addEventListener('touchstart', handler, {passive:false});
+    });
 
-    // Particles
-    let freezeFlakes = []; // freeze snow around player
-    let ghostMotes = [];   // spooky motes during ghost
-
-    // World/grid generation
-    // grid: 0 wall, 1 pellet, 2 empty path, 3 ghost area, 4 freeze PU, 5 invuln PU, 6 frenzy PU
+    // World generation
     function generateMaze(seed){
       const rnd = makeRand(seed*1337+9001);
       const grid = Array.from({length:ROWS},()=>Array(COLS).fill(0));
@@ -430,7 +477,7 @@
         }else st.pop();
       }
 
-      // Add more loops to improve branching
+      // Add loops
       const loopAdds = Math.floor((W*H)/14);
       for(let i=0;i<loopAdds;i++){
         const x=2+Math.floor(rnd()*(W-4)), y=2+Math.floor(rnd()*(H-4));
@@ -481,7 +528,7 @@
       ], seed};
     }
 
-    // Place power-ups (4=freeze, 5=ghost, 6=frenzy), far apart
+    // Place power-ups (4=freeze, 5=ghost, 6=frenzy)
     function placePowerups(world){
       const pellets=[], extras=[];
       for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
@@ -516,12 +563,6 @@
       return arr;
     }
 
-    // Game State
-    let level=1, currentSeed=1, world=null, player=null, enemies=[], dotsLeft=0, lastTime=0, running=false;
-    let desiredDir = {x:0,y:0};
-    let hasMoved=false;
-    let openTiles=[];
-
     function startGame(resetAll=false){
       if(resetAll){ level=1; currentSeed=1; }
       loadLevel(level, level);
@@ -540,7 +581,8 @@
 
     function loadLevel(n, seedForMaze){
       currentSeed = seedForMaze;
-      world = generateMaze(seedForMaze);
+      const gen = generateMaze(seedForMaze);
+      world = gen;
       placePowerups(world);
       dotsLeft = world.dots;
       openTiles = buildOpenTiles(world.grid);
@@ -575,35 +617,9 @@
       centerText.style.display = 'none';
       gameOverOverlay.classList.add('hidden');
 
-      // Ensure layout is correct after (re)load
+      // Ensure layout correct after load
       resizeCanvas();
     }
-
-    // Keyboard input
-    window.addEventListener('keydown', (e)=>{
-      const k = e.key.toLowerCase();
-      if(['arrowup','w'].includes(k)) desiredDir = DIRS.up;
-      else if(['arrowdown','s'].includes(k)) desiredDir = DIRS.down;
-      else if(['arrowleft','a'].includes(k)) desiredDir = DIRS.left;
-      else if(['arrowright','d'].includes(k)) desiredDir = DIRS.right;
-      lastCommandMs = performance.now();
-    });
-
-    // On-screen D-Pad
-    function setDirFromButton(dir){
-      if(dir==='up') desiredDir = DIRS.up;
-      if(dir==='down') desiredDir = DIRS.down;
-      if(dir==='left') desiredDir = DIRS.left;
-      if(dir==='right') desiredDir = DIRS.right;
-      lastCommandMs = performance.now();
-    }
-    document.querySelectorAll('.dpad-btn').forEach(btn=>{
-      const dir = btn.getAttribute('data-dir');
-      const handler = (e)=>{ e.preventDefault(); setDirFromButton(dir); };
-      btn.addEventListener('pointerdown', handler);
-      btn.addEventListener('click', handler);
-      btn.addEventListener('touchstart', handler, {passive:false});
-    });
 
     // Grid helpers
     function isWall(tx,ty){
@@ -724,6 +740,7 @@
         }
       }
 
+      // Move
       g.x += g.dir.x * g.speed * dt;
       g.y += g.dir.y * g.speed * dt;
 
@@ -735,6 +752,7 @@
 
       const tx = Math.floor(g.x), ty=Math.floor(g.y);
 
+      // Collisions; when idle, treat leaving house as blocked
       if(g.dir.x!==0){
         const n = g.dir.x>0? Math.floor(g.x+g.radius) : Math.floor(g.x-g.radius);
         const leavingHouse = idle && world.grid[ty] && world.grid[ty][n]!==3;
@@ -778,9 +796,8 @@
       }else if(v===4 || v===5 || v===6){
         world.grid[cy][cx]=2;
         if(v===4){ freezeTimer = 11; hudStatus.textContent='Freeze! 11s'; }
-        else if(v===5){
-          invulnTimer = 12; hudStatus.textContent='Ghost! 12s';
-        }else { frenzyTimer = 10; hudStatus.textContent='Frenzy! 10s'; }
+        else if(v===5){ invulnTimer = 12; hudStatus.textContent='Ghost! 12s'; }
+        else { frenzyTimer = 10; hudStatus.textContent='Frenzy! 10s'; }
       }
     }
 
@@ -804,7 +821,6 @@
         const dy = (g.y - player.y)*TILE;
         if(Math.hypot(dx,dy) < TILE*0.6){
           if(frenzyTimer>0){
-            // eat enemy, respawn later
             g.state='eaten'; g.respawn=5;
             for(let i=0;i<12;i++){
               const a=Math.random()*Math.PI*2, sp=2+Math.random()*2;
@@ -842,11 +858,9 @@
       const x = (canvas.width - metrics.width)/2;
       const y = canvas.height*0.35 + size*0.4;
 
-      // base soft fill
       ctx.globalAlpha = 0.10; ctx.fillStyle='#ffd6a8'; ctx.fillText(text, x+2, y+2);
       ctx.globalAlpha = 0.18; ctx.fillStyle='#ffffff'; ctx.fillText(text, x, y);
 
-      // sweeping edge strip (South -> North)
       const period = 7.0;
       const p = (animT / period) % 1;
       const bandCenterY = canvas.height * (1 - p);
@@ -875,7 +889,7 @@
       ctx.restore();
     }
 
-    // 3D-styled walls with texture and shadows
+    // 3D-styled walls
     function drawMaze3D(){
       for(let y=0;y<ROWS;y++){
         for(let x=0;x<COLS;x++){
@@ -970,6 +984,7 @@
             ctx.strokeStyle='rgba(120,190,255,0.9)';
             ctx.lineWidth=Math.max(2,Math.floor(TILE*0.06));
             ctx.stroke();
+            // eyes
             ctx.fillStyle='#0b0b0e';
             const eyeR = Math.max(1, TILE*0.06);
             ctx.beginPath(); ctx.arc(-r*0.25, -r*0.05, eyeR, 0, Math.PI*2); ctx.fill();
@@ -1018,7 +1033,7 @@
       let px = player.x*TILE, py = player.y*TILE + bounce;
       const r=player.radius*TILE;
 
-      // Freeze aura (thicker) + snowy particles
+      // Freeze aura + flakes
       if(freezeTimer>0){
         const tNorm = 1 - (freezeTimer/11);
         const speed = lerp(1.2, 12.0, tNorm);
@@ -1067,7 +1082,7 @@
         ctx.restore();
       }
 
-      // Ghost spooky motes (subtle particles), drawn before cloak
+      // Ghost motes (before cloak)
       if(invulnTimer>0 && ghostMotes.length){
         ctx.save();
         ctx.shadowColor='rgba(140,120,255,0.45)';
@@ -1082,7 +1097,7 @@
         ctx.restore();
       }
 
-      // If Ghost: fully opaque cloak; no circle aura
+      // Ghost cloak
       if(invulnTimer>0){
         const tNorm = 1 - (invulnTimer/12);
         const pulse = 0.6 + 0.4*Math.sin(animT*lerp(2.0, 9.5, tNorm));
@@ -1129,10 +1144,10 @@
         drawGlassesCentered(0,0,wLens,hLens,bridgeGap);
         ctx.restore();
 
-        return; // skip orange body
+        return;
       }
 
-      // Normal orange body (when not ghost)
+      // Normal orange body
       ctx.save();
       const grad = ctx.createRadialGradient(px-r*0.4,py-r*0.4,r*0.2, px,py,r*1.2);
       grad.addColorStop(0,'#ffd79c'); grad.addColorStop(0.35,'#ffb457'); grad.addColorStop(0.7,'#ff8d1f'); grad.addColorStop(1,'#ff7a00');
@@ -1387,7 +1402,7 @@
       if(running) requestAnimationFrame(loop);
     }
 
-    // Menu backdrop
+    // Menu backdrop (when not running)
     function drawMenuBackdrop(){
       ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.strokeStyle='rgba(255,122,0,.15)'; ctx.lineWidth=1;
@@ -1396,32 +1411,6 @@
       }
     }
     drawMenuBackdrop();
-
-    // World state and game loop bootstrap
-    const DIRS = { up:{x:0,y:-1}, down:{x:0,y:1}, left:{x:-1,y:0}, right:{x:1,y:0} }; // redeclared? ensure no duplicate (already above)
-    // Game logic vars (declared earlier)
-    let world=null, player=null, enemies=[], dotsLeft=0, openTiles=[];
-    // Oops: we already declared globally above; keeping current ones.
-
-    // Start helpers
-    function startGame(resetAll=false){
-      if(resetAll){ level=1; currentSeed=1; }
-      loadLevel(level, level);
-      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
-    }
-    function restartSameLevel(){
-      loadLevel(level, currentSeed);
-      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
-    }
-    function changeMazeSameLevel(){
-      let s=currentSeed;
-      do{ s = 1 + Math.floor(Math.random()*MAX_LEVEL); } while(s===currentSeed);
-      loadLevel(level, s);
-      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
-    }
-
-    // Vars pulled up after refactor
-    let level=1, currentSeed=1, running=false, lastTime=performance.now();
 
   })();
   </script>
