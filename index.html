@@ -14,15 +14,16 @@
     }
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;background:#000;color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    #game-wrap{position:relative;height:100vh;width:100vw;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
-    canvas{background:#000;display:block;max-width:100vw;max-height:100vh}
+    #game-wrap{position:relative;height:100vh;width:100vw;background:#000;overflow:hidden}
+
+    canvas{background:#000;display:block;max-width:100vw;max-height:100vh;margin:0 auto}
 
     /* HUD */
     #hud{
       position:absolute;left:0;right:0;top:0;padding:8px 12px;
       display:flex;gap:12px;align-items:center;justify-content:space-between;
       pointer-events:none;font-weight:600;letter-spacing:.4px;
-      text-shadow:0 1px 0 rgba(0,0,0,.3)
+      text-shadow:0 1px 0 rgba(0,0,0,.3);z-index:4
     }
     .pill{
       background:linear-gradient(180deg,var(--orange2),var(--orange));
@@ -47,7 +48,7 @@
       box-shadow:0 12px 60px rgba(255,122,0,.15), 0 2px 0 rgba(255,255,255,.02) inset
     }
 
-    /* Title with depth (no glow) */
+    /* Title with depth */
     .title{
       font-size: clamp(28px, 5vw, 56px);
       line-height:1.18;
@@ -68,9 +69,6 @@
       background:linear-gradient(180deg,#ffa24d,#ff7a00);
       color:#120900;border:0;border-radius:12px;padding:12px 16px;
       font-weight:800;letter-spacing:.3px;cursor:pointer;box-shadow:0 6px 24px rgba(255,122,0,.35)
-    }
-    button.secondary{
-      background:#181a20;color:#ffd6b3;border:1px solid rgba(255,122,0,.35)
     }
     .list{margin:10px 0 0 0;padding-left:18px;font-size:14px;opacity:.94}
     .badge{margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#16181f;border:1px solid rgba(255,122,0,.28);font-size:12px}
@@ -134,11 +132,7 @@
     }
 
     /* Power-up blurb styling on start UI */
-    .pu-list{
-      margin:14px 0 0 0;
-      display:grid;
-      gap:10px;
-    }
+    .pu-list{margin:14px 0 0 0;display:grid;gap:10px}
     .pu-row{
       display:flex;align-items:center;gap:12px;
       background:linear-gradient(180deg,#14151b,#0f1015);
@@ -158,6 +152,31 @@
     .pu-frenzy{background:linear-gradient(180deg,#ff7777,#ff3a3a); color:#250202;}
     .pu-text{flex:1; font-size:14px; opacity:.95}
     .pu-em{font-weight:800;color:#ffd9b0}
+
+    /* D-Pad */
+    #dpad{
+      position:absolute;left:0;right:0;bottom:0;height:160px;
+      display:flex;align-items:center;justify-content:center;
+      gap:18px;padding:10px 14px;z-index:4;
+      background:linear-gradient(180deg, #06070a 0%, #090a0f 100%);
+      border-top:1px solid rgba(255,122,0,.15);
+      box-shadow:0 -8px 30px rgba(0,0,0,.5);
+    }
+    .pad{
+      width:240px;height:140px;display:grid;
+      grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;
+      gap:10px;touch-action:none
+    }
+    .dpad-btn{
+      background:linear-gradient(180deg,#171a20,#0f1217);
+      border:1px solid rgba(255,122,0,.25);
+      box-shadow:0 6px 24px rgba(255,122,0,.12), 0 2px 0 rgba(255,255,255,.04) inset;
+      color:#ffd9b0;font-size:28px;font-weight:900;border-radius:12px;
+      display:flex;align-items:center;justify-content:center;
+      user-select:none;cursor:pointer
+    }
+    .dpad-btn:active{transform:scale(0.98)}
+    .dpad-empty{pointer-events:none;opacity:0}
   </style>
 </head>
 <body>
@@ -196,11 +215,11 @@
           A fast-paced, retro-style maze chase where you collect points, dodge enemies, and clear levels in an endless arcade challenge.
         </p>
         <p class="subtitle" style="opacity:.92">
-          Controls: Arrow Keys / WASD (PC) • Swipe (Mobile). Movement is continuous until a wall blocks you.<br>
+          Controls: Arrow Keys / WASD (PC) • On-screen D-Pad (Mobile). Movement is continuous until a wall blocks you.<br>
           Power-ups: 3 per level, spread apart.
         </p>
 
-        <!-- Icon-led power-up list (clean game-style) -->
+        <!-- Icon-led power-up list -->
         <div class="pu-list">
           <div class="pu-row">
             <span class="pu-icon pu-ice">❄️</span>
@@ -246,17 +265,39 @@
         </div>
       </div>
     </div>
+
+    <!-- D-Pad controls -->
+    <div id="dpad" aria-label="Directional controls">
+      <div class="pad">
+        <div class="dpad-empty"></div>
+        <div class="dpad-btn" data-dir="up" aria-label="Up">▲</div>
+        <div class="dpad-empty"></div>
+
+        <div class="dpad-btn" data-dir="left" aria-label="Left">◀</div>
+        <div class="dpad-empty"></div>
+        <div class="dpad-btn" data-dir="right" aria-label="Right">▶</div>
+
+        <div class="dpad-empty"></div>
+        <div class="dpad-btn" data-dir="down" aria-label="Down">▼</div>
+        <div class="dpad-empty"></div>
+      </div>
+    </div>
+
   </div>
 
   <script>
   (() => {
+    // Layout reserve for D-Pad
+    const DPAD_HEIGHT = 160;
+
     // Maze settings
     const COLS = 22;
     const ROWS = 25;
     const MAX_LEVEL = 50;
-    const PLAYER_SPEED_TPS = 7.0;
-    const ENEMY_SPEED_TPS  = 6.2;
-    const ENEMY_IDLE_SPEED = 2.2; // roam inside ghost house before player moves
+    // Slower speeds for finer control
+    const PLAYER_SPEED_TPS = 5.2;   // was 7.0
+    const ENEMY_SPEED_TPS  = 4.8;   // was 6.2
+    const ENEMY_IDLE_SPEED = 1.6;   // was 2.2
     const TILE_ASPECT_MARGIN = 0.96;
 
     // DOM
@@ -283,15 +324,20 @@
       startOverlay.classList.remove('hidden');
     }
 
-    // Responsive canvas
+    // Responsive canvas (reserve space for D-Pad)
     let TILE = 24;
     function resizeCanvas(){
-      const w = window.innerWidth, h = window.innerHeight;
+      const w = window.innerWidth;
+      const hAvail = Math.max(200, window.innerHeight - DPAD_HEIGHT);
       const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
-      const tileH = Math.floor((h * TILE_ASPECT_MARGIN) / ROWS);
+      const tileH = Math.floor((hAvail * TILE_ASPECT_MARGIN) / ROWS);
       TILE = Math.max(10, Math.min(tileW, tileH));
       canvas.width = COLS * TILE;
       canvas.height= ROWS * TILE;
+      // center canvas horizontally and place top so D-Pad sits below
+      canvas.style.position = 'absolute';
+      canvas.style.left = `${(window.innerWidth - canvas.width)/2}px`;
+      canvas.style.top  = `${Math.max(0, (hAvail - canvas.height)/2)}px`;
     }
     window.addEventListener('resize', resizeCanvas, {passive:true});
     resizeCanvas();
@@ -490,7 +536,7 @@
       gameOverOverlay.classList.add('hidden');
     }
 
-    // Input
+    // Keyboard input
     window.addEventListener('keydown', (e)=>{
       const k = e.key.toLowerCase();
       if(['arrowup','w'].includes(k)) desiredDir = DIRS.up;
@@ -500,24 +546,22 @@
       lastCommandMs = performance.now();
     });
 
-    let touchStart=null;
-    canvas.addEventListener('touchstart', (e)=>{
-      const t = e.changedTouches[0];
-      touchStart = {x:t.clientX, y:t.clientY};
-    }, {passive:true});
-    canvas.addEventListener('touchmove', (e)=>{ e.preventDefault(); }, {passive:false});
-    canvas.addEventListener('touchend', (e)=>{
-      if(!touchStart) return;
-      const t = e.changedTouches[0];
-      const dx = t.clientX - touchStart.x;
-      const dy = t.clientY - touchStart.y;
-      const ax = Math.abs(dx), ay=Math.abs(dy);
-      const min = 12;
-      if(ax>ay && ax>min){ desiredDir = dx>0?DIRS.right:DIRS.left; }
-      else if(ay>min){ desiredDir = dy>0?DIRS.down:DIRS.up; }
-      touchStart=null;
+    // On-screen D-Pad
+    function setDirFromButton(dir){
+      if(dir==='up') desiredDir = DIRS.up;
+      if(dir==='down') desiredDir = DIRS.down;
+      if(dir==='left') desiredDir = DIRS.left;
+      if(dir==='right') desiredDir = DIRS.right;
       lastCommandMs = performance.now();
-    }, {passive:true});
+    }
+    document.querySelectorAll('.dpad-btn').forEach(btn=>{
+      const dir = btn.getAttribute('data-dir');
+      const handler = (e)=>{ e.preventDefault(); setDirFromButton(dir); };
+      btn.addEventListener('pointerdown', handler);
+      btn.addEventListener('click', handler);
+      btn.addEventListener('touchstart', handler, {passive:false});
+    });
+    // Note: swipe controls removed in favor of D-Pad
 
     // Grid helpers
     function isWall(tx,ty){
@@ -638,7 +682,6 @@
         }
       }
 
-      // Move
       g.x += g.dir.x * g.speed * dt;
       g.y += g.dir.y * g.speed * dt;
 
@@ -650,7 +693,6 @@
 
       const tx = Math.floor(g.x), ty=Math.floor(g.y);
 
-      // Collisions; when idle, treat leaving house as blocked
       if(g.dir.x!==0){
         const n = g.dir.x>0? Math.floor(g.x+g.radius) : Math.floor(g.x-g.radius);
         const leavingHouse = idle && world.grid[ty] && world.grid[ty][n]!==3;
@@ -797,7 +839,6 @@
         for(let x=0;x<COLS;x++){
           if(world.grid[y][x]===0){
             const px=x*TILE, py=y*TILE, w=TILE, h=TILE;
-            // base orange bevel
             const g=ctx.createLinearGradient(px,py,px,py+h);
             g.addColorStop(0,'#ffb56b');
             g.addColorStop(0.45,'#ff8e1f');
@@ -805,16 +846,13 @@
             ctx.fillStyle=g;
             roundRect(px+0.5,py+0.5,w-1,h-1, Math.floor(TILE*0.22));
 
-            // top highlight
             ctx.fillStyle='rgba(255,220,170,0.35)';
             ctx.fillRect(px+2,py+2,w-4,Math.max(2,Math.floor(h*0.12)));
 
-            // right/bottom shadow
             ctx.fillStyle='rgba(0,0,0,0.25)';
             ctx.fillRect(px+w-3,py+3,2,h-6);
             ctx.fillRect(px+3,py+h-3,w-6,2);
 
-            // subtle texture specks
             ctx.fillStyle='rgba(255,255,255,0.04)';
             for(let i=0;i<2;i++){
               const sx=px+4+Math.random()*(w-8), sy=py+4+Math.random()*(h-8);
@@ -1137,7 +1175,6 @@
     function drawEnemies(){
       const frozen = freezeTimer>0;
       for(const g of enemies){
-        // particles burst if eaten
         if(g.state!=='alive'){
           for(const p of g.particles){
             const x=p.x*TILE, y=p.y*TILE;
