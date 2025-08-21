@@ -324,6 +324,18 @@
     const endOverlay   = document.getElementById('endOverlay');
     const gameOverOverlay = document.getElementById('gameOverOverlay');
 
+    // D-Pad visibility logic (show on touch/coarse-pointer devices)
+    let dpadEnabled = true;
+    function shouldShowDpad(){
+      const hasTouch = (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
+      const anyCoarse = window.matchMedia && window.matchMedia('(any-pointer: coarse)').matches;
+      return !!(hasTouch || anyCoarse);
+    }
+    function updateDpadVisibility(){
+      dpadEnabled = shouldShowDpad();
+      dpad.classList.toggle('hidden', !dpadEnabled);
+    }
+
     // Game State
     let level=1, currentSeed=1, running=false, lastTime=performance.now();
     let world=null, player=null, enemies=[], dotsLeft=0, openTiles=[];
@@ -385,10 +397,15 @@
     // Responsive canvas and D-Pad placement
     let TILE = 24;
     function resizeCanvas(){
+      // Decide whether to show D-Pad for this environment
+      updateDpadVisibility();
+
       const sz = computeDpadSize();
-      // Reserve room below maze for D-Pad so it sits right under the bottom wall
-      const reserveH = sz.padH + 16; // breathing room
       const w = window.innerWidth;
+
+      // If D-Pad is disabled (desktop), don't reserve space for it
+      const reserveH = dpadEnabled ? (sz.padH + 16) : 0;
+
       const hAvail = Math.max(260, window.innerHeight - reserveH);
       const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
       const tileH = Math.floor((hAvail * TILE_ASPECT_MARGIN) / ROWS);
@@ -402,24 +419,31 @@
       canvas.style.top  = `${top}px`;
       canvas.style.left = `${left}px`;
 
-      // Apply D-Pad CSS sizes
-      dpad.style.setProperty('--btn', `${sz.btn}px`);
-      dpad.style.setProperty('--gap', `${sz.gap}px`);
-      dpad.style.setProperty('--pad-w', `${sz.padW}px`);
-      dpad.style.setProperty('--pad-h', `${sz.padH}px`);
-      dpad.style.setProperty('--fs', `${sz.fs}px`);
+      if(dpadEnabled){
+        // Apply D-Pad CSS sizes and position only when visible
+        dpad.style.setProperty('--btn', `${sz.btn}px`);
+        dpad.style.setProperty('--gap', `${sz.gap}px`);
+        dpad.style.setProperty('--pad-w', `${sz.padW}px`);
+        dpad.style.setProperty('--pad-h', `${sz.padH}px`);
+        dpad.style.setProperty('--fs', `${sz.fs}px`);
 
-      // Position D-Pad directly below the maze's bottom boundary wall, centered
-      const margin = Math.max(6, Math.floor(TILE*0.25));
-      const dpadTop = top + canvas.height + margin;
-      const dpadLeft = Math.max(8, Math.floor((w - sz.padW)/2));
-      dpad.style.top = `${dpadTop}px`;
-      dpad.style.left= `${dpadLeft}px`;
+        const margin = Math.max(6, Math.floor(TILE*0.25));
+        const dpadTop = top + canvas.height + margin;
+        const dpadLeft = Math.max(8, Math.floor((w - sz.padW)/2));
+        dpad.style.top = `${dpadTop}px`;
+        dpad.style.left= `${dpadLeft}px`;
+      }
     }
     window.addEventListener('resize', resizeCanvas, {passive:true});
     window.addEventListener('orientationchange', resizeCanvas);
     if(window.visualViewport){
       window.visualViewport.addEventListener('resize', resizeCanvas, {passive:true});
+    }
+    // React if pointer capabilities change (rare but useful on hybrids)
+    if (window.matchMedia) {
+      const mm = window.matchMedia('(any-pointer: coarse)');
+      if (mm.addEventListener) mm.addEventListener('change', resizeCanvas);
+      else if (mm.addListener) mm.addListener(resizeCanvas);
     }
     resizeCanvas();
 
