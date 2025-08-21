@@ -16,7 +16,7 @@
     html,body{height:100%;margin:0;background:#000;color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     #game-wrap{position:relative;height:100vh;width:100vw;background:#000;overflow:hidden}
 
-    canvas{background:#000;display:block;max-width:100vw;max-height:100vh;margin:0 auto}
+    canvas{background:#000;display:block;max-width:100vw;max-height:100vh;position:absolute}
 
     /* HUD */
     #hud{
@@ -153,25 +153,33 @@
     .pu-text{flex:1; font-size:14px; opacity:.95}
     .pu-em{font-weight:800;color:#ffd9b0}
 
-    /* D-Pad */
+    /* D-Pad (position and sizing controlled by JS via CSS vars) */
     #dpad{
-      position:absolute;left:0;right:0;bottom:0;height:160px;
-      display:flex;align-items:center;justify-content:center;
-      gap:18px;padding:10px 14px;z-index:4;
-      background:linear-gradient(180deg, #06070a 0%, #090a0f 100%);
-      border-top:1px solid rgba(255,122,0,.15);
+      position:absolute;z-index:4;
+      /* Centering and top are set in JS */
+      background:linear-gradient(180deg, rgba(6,7,10,0.85) 0%, rgba(9,10,15,0.85) 100%);
+      border:1px solid rgba(255,122,0,.15);
+      border-radius:16px;
       box-shadow:0 -8px 30px rgba(0,0,0,.5);
+      padding:10px;
+      backdrop-filter: blur(6px);
     }
     .pad{
-      width:240px;height:140px;display:grid;
-      grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;
-      gap:10px;touch-action:none
+      display:grid;
+      grid-template-columns:1fr 1fr 1fr;
+      grid-template-rows:1fr 1fr 1fr;
+      gap: var(--gap,12px);
+      width: var(--pad-w,720px);
+      height: var(--pad-h,720px);
+      touch-action:none;
     }
     .dpad-btn{
+      width: var(--btn,140px);
+      height: var(--btn,140px);
       background:linear-gradient(180deg,#171a20,#0f1217);
-      border:1px solid rgba(255,122,0,.25);
-      box-shadow:0 6px 24px rgba(255,122,0,.12), 0 2px 0 rgba(255,255,255,.04) inset;
-      color:#ffd9b0;font-size:28px;font-weight:900;border-radius:12px;
+      border:1px solid rgba(255,122,0,.35);
+      box-shadow:0 10px 28px rgba(255,122,0,.18), 0 2px 0 rgba(255,255,255,.05) inset;
+      color:#ffd9b0;font-size: var(--fs,38px);font-weight:900;border-radius:14px;
       display:flex;align-items:center;justify-content:center;
       user-select:none;cursor:pointer
     }
@@ -266,7 +274,7 @@
       </div>
     </div>
 
-    <!-- D-Pad controls -->
+    <!-- D-Pad controls (positioned via JS just beneath the maze) -->
     <div id="dpad" aria-label="Directional controls">
       <div class="pad">
         <div class="dpad-empty"></div>
@@ -287,9 +295,6 @@
 
   <script>
   (() => {
-    // Layout reserve for D-Pad
-    const DPAD_HEIGHT = 160;
-
     // Maze settings
     const COLS = 22;
     const ROWS = 25;
@@ -301,12 +306,15 @@
     const TILE_ASPECT_MARGIN = 0.96;
 
     // DOM
+    const wrap   = document.getElementById('game-wrap');
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const hudLevel  = document.getElementById('hudLevel');
     const hudDots   = document.getElementById('hudDots');
     const hudStatus = document.getElementById('hudStatus');
     const centerText= document.getElementById('centerText');
+    const dpad = document.getElementById('dpad');
+    const pad = dpad.querySelector('.pad');
 
     const startOverlay = document.getElementById('startOverlay');
     const endOverlay   = document.getElementById('endOverlay');
@@ -324,20 +332,52 @@
       startOverlay.classList.remove('hidden');
     }
 
-    // Responsive canvas (reserve space for D-Pad)
+    // Compute D-Pad responsive sizing
+    function computeDpadSize(){
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // Button size aims to be big on both mobile and desktop (including mobile emulation)
+      const btn = Math.floor(Math.max(96, Math.min(160, Math.min(vw, vh)*0.18)));
+      const gap = Math.max(12, Math.floor(btn*0.12));     // spacing between buttons
+      const fs  = Math.floor(btn*0.28);                   // icon text size
+      const padW = btn*3 + gap*2;
+      const padH = btn*3 + gap*2;
+      return {btn, gap, fs, padW, padH};
+    }
+
+    // Responsive canvas and D-Pad placement
     let TILE = 24;
     function resizeCanvas(){
+      // Size D-Pad first to reserve room for it
+      const sz = computeDpadSize();
+      // Reserve space below maze so D-Pad fits right under it
+      const reserveH = sz.padH + 16; // 16px breathing room
       const w = window.innerWidth;
-      const hAvail = Math.max(200, window.innerHeight - DPAD_HEIGHT);
+      const hAvail = Math.max(240, window.innerHeight - reserveH);
       const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
       const tileH = Math.floor((hAvail * TILE_ASPECT_MARGIN) / ROWS);
       TILE = Math.max(10, Math.min(tileW, tileH));
       canvas.width = COLS * TILE;
       canvas.height= ROWS * TILE;
-      // center canvas horizontally and place top so D-Pad sits below
-      canvas.style.position = 'absolute';
-      canvas.style.left = `${(window.innerWidth - canvas.width)/2}px`;
-      canvas.style.top  = `${Math.max(0, (hAvail - canvas.height)/2)}px`;
+      // Center canvas at top area (above D-Pad)
+      const top = Math.max(0, Math.floor((hAvail - canvas.height)/2));
+      const left = Math.floor((w - canvas.width)/2);
+      canvas.style.top  = `${top}px`;
+      canvas.style.left = `${left}px`;
+
+      // Apply D-Pad size via CSS vars
+      dpad.style.setProperty('--btn', `${sz.btn}px`);
+      dpad.style.setProperty('--gap', `${sz.gap}px`);
+      dpad.style.setProperty('--pad-w', `${sz.padW}px`);
+      dpad.style.setProperty('--pad-h', `${sz.padH}px`);
+      dpad.style.setProperty('--fs', `${sz.fs}px`);
+
+      // Position D-Pad directly below maze bottom boundary wall
+      const margin = Math.max(6, Math.floor(TILE*0.25));
+      const dpadTop = top + canvas.height + margin;
+      const dpadLeft = Math.max(8, Math.floor((w - sz.padW)/2));
+      dpad.style.top = `${dpadTop}px`;
+      dpad.style.left= `${dpadLeft}px`;
     }
     window.addEventListener('resize', resizeCanvas, {passive:true});
     resizeCanvas();
@@ -534,6 +574,9 @@
       hudStatus.textContent= 'Ready';
       centerText.style.display = 'none';
       gameOverOverlay.classList.add('hidden');
+
+      // Ensure layout is correct after (re)load
+      resizeCanvas();
     }
 
     // Keyboard input
@@ -561,7 +604,6 @@
       btn.addEventListener('click', handler);
       btn.addEventListener('touchstart', handler, {passive:false});
     });
-    // Note: swipe controls removed in favor of D-Pad
 
     // Grid helpers
     function isWall(tx,ty){
@@ -914,7 +956,7 @@
               ctx.beginPath(); ctx.moveTo(0,-r*0.6); ctx.lineTo(r*0.12,-r*0.78); ctx.moveTo(0,-r*0.6); ctx.lineTo(-r*0.12,-r*0.78); ctx.stroke();
             }
           }else if(v===5){
-            // Ghost icon: white with eyes (soft glow)
+            // Ghost icon
             ctx.translate(cx,cy);
             const r=TILE*0.34;
             ctx.fillStyle='#ffffff';
@@ -928,13 +970,12 @@
             ctx.strokeStyle='rgba(120,190,255,0.9)';
             ctx.lineWidth=Math.max(2,Math.floor(TILE*0.06));
             ctx.stroke();
-            // eyes
             ctx.fillStyle='#0b0b0e';
             const eyeR = Math.max(1, TILE*0.06);
             ctx.beginPath(); ctx.arc(-r*0.25, -r*0.05, eyeR, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(r*0.25, -r*0.05, eyeR, 0, Math.PI*2); ctx.fill();
           }else{
-            // Frenzy: red bolt (shorter height)
+            // Frenzy: shorter red bolt
             ctx.translate(cx,cy);
             ctx.fillStyle='#ff3a3a';
             ctx.strokeStyle='#ffffff';
@@ -957,10 +998,8 @@
 
     // Player visuals
     function drawPlayer(){
-      // Any power-up active disables panic/jitter
       const activePU = (freezeTimer>0 || invulnTimer>0 || frenzyTimer>0);
 
-      // Panic proximity (disabled while any power-up is active)
       const panicThreshold = player.radius*2*3;
       let minDist = Infinity;
       for(const g of enemies){
@@ -971,7 +1010,6 @@
       const panic = !activePU && hasMoved && minDist < panicThreshold;
       const panicAmt = panic ? clamp(panicThreshold - minDist, 0, panicThreshold) / panicThreshold : 0;
 
-      // Idle bounce
       const now = performance.now();
       const stationary = (player.dir.x===0 && player.dir.y===0);
       const idleBounceActive = hasMoved && stationary && (now - lastCommandMs > 2500);
@@ -991,7 +1029,6 @@
         ctx.beginPath(); ctx.arc(px,py,rad,0,Math.PI*2); ctx.stroke();
         ctx.restore();
 
-        // draw freeze flakes
         if(freezeFlakes.length){
           ctx.save();
           for(const f of freezeFlakes){
@@ -1014,7 +1051,6 @@
         ctx.strokeStyle=`rgba(255,65,65,${flash})`;
         ctx.lineWidth=Math.max(3,Math.floor(TILE*0.14));
         ctx.beginPath(); ctx.arc(px,py,r*1.28,0,Math.PI*2); ctx.stroke();
-        // lightning jolts
         ctx.shadowBlur=0;
         ctx.strokeStyle='rgba(255,65,65,0.98)';
         ctx.lineWidth=Math.max(2,Math.floor(TILE*0.06));
@@ -1054,7 +1090,7 @@
         const sway = (-dirX)*r*0.45 + Math.sin(animT*9.0)*r*0.08;
 
         ctx.save();
-        ctx.fillStyle = '#ffffff'; // opaque
+        ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = `rgba(120,190,255,${0.95*pulse})`;
         ctx.lineWidth = Math.max(2, Math.floor(TILE*0.10));
 
@@ -1081,7 +1117,7 @@
         ctx.stroke();
         ctx.restore();
 
-        // Sunglasses on top of cloak
+        // Sunglasses
         const wobble = Math.sin(animT*8) * 0.05;
         const wLens = r*0.70;
         const hLens = r*0.38;
@@ -1212,7 +1248,7 @@
           openness = 0;
         }else{
           const phase = animT*6 + g.crunchOffset;
-          const cyc = 0.5 + 0.5*Math.sin(phase); // 0..1
+          const cyc = 0.5 + 0.5*Math.sin(phase);
           openness = clamp(cyc * 0.52, 0, 0.52);
         }
         const mCx = x;
@@ -1234,7 +1270,7 @@
         ctx.beginPath(); ctx.moveTo(x - r*0.45, y - r*0.28); ctx.lineTo(x - r*0.18, y - r*0.15); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x + r*0.45, y - r*0.28); ctx.lineTo(x + r*0.18, y - r*0.15); ctx.stroke();
 
-        // eyes (drawn after mouth)
+        // eyes
         ctx.fillStyle='#ffffff';
         ctx.beginPath(); ctx.ellipse(x-r*0.22, y-r*0.05, r*0.12, r*0.14, 0, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.ellipse(x+r*0.22, y-r*0.05, r*0.12, r*0.14, 0, 0, Math.PI*2); ctx.fill();
@@ -1255,7 +1291,7 @@
       }
     }
 
-    // Main loop
+    // Loop
     function loop(t){
       if(!running) return;
       const dt = Math.min(0.05, (t - lastTime)/1000);
@@ -1266,12 +1302,12 @@
       if(invulnTimer>0){ invulnTimer = Math.max(0, invulnTimer - dt); if(invulnTimer===0){ hudStatus.textContent=''; ghostMotes.length=0; } }
       if(frenzyTimer>0){ frenzyTimer = Math.max(0, frenzyTimer - dt); if(frenzyTimer===0) hudStatus.textContent=''; }
 
-      // Update player
+      // Player
       player.speed = PLAYER_SPEED_TPS;
       stepEntity(player, dt);
       tryEatPellet();
 
-      // Update freeze flakes
+      // Freeze flakes
       if(freezeTimer>0){
         if(freezeFlakes.length < 120){
           const spawn = 4;
@@ -1303,7 +1339,7 @@
         freezeFlakes.length = 0;
       }
 
-      // Spawn/update ghost motes
+      // Ghost motes
       if(invulnTimer>0){
         if(ghostMotes.length < 90){
           const spawn = 3;
@@ -1327,7 +1363,6 @@
           const m = ghostMotes[i];
           m.age += dt;
           if(m.age > m.life){ ghostMotes.splice(i,1); continue; }
-          // slight upward drift and a tiny swirl
           const swirl = 0.15;
           const toPlayerX = (player.x - m.x), toPlayerY = (player.y - m.y);
           m.vx += (-toPlayerY)*swirl*dt*0.2;
@@ -1361,6 +1396,32 @@
       }
     }
     drawMenuBackdrop();
+
+    // World state and game loop bootstrap
+    const DIRS = { up:{x:0,y:-1}, down:{x:0,y:1}, left:{x:-1,y:0}, right:{x:1,y:0} }; // redeclared? ensure no duplicate (already above)
+    // Game logic vars (declared earlier)
+    let world=null, player=null, enemies=[], dotsLeft=0, openTiles=[];
+    // Oops: we already declared globally above; keeping current ones.
+
+    // Start helpers
+    function startGame(resetAll=false){
+      if(resetAll){ level=1; currentSeed=1; }
+      loadLevel(level, level);
+      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
+    }
+    function restartSameLevel(){
+      loadLevel(level, currentSeed);
+      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
+    }
+    function changeMazeSameLevel(){
+      let s=currentSeed;
+      do{ s = 1 + Math.floor(Math.random()*MAX_LEVEL); } while(s===currentSeed);
+      loadLevel(level, s);
+      running = true; lastTime = performance.now(); requestAnimationFrame(loop);
+    }
+
+    // Vars pulled up after refactor
+    let level=1, currentSeed=1, running=false, lastTime=performance.now();
 
   })();
   </script>
