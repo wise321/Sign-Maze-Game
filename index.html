@@ -183,7 +183,7 @@
     .pu-text{flex:1; font-size:14px; opacity:.95}
     .pu-em{font-weight:800;color:#ffd9b0}
 
-    /* D-Pad (position and sizing controlled by JS via CSS vars) */
+    /* D-Pad */
     #dpad{
       position:absolute;z-index:4;
       background:linear-gradient(180deg, rgba(6,7,10,0.85) 0%, rgba(9,10,15,0.85) 100%);
@@ -345,6 +345,7 @@
     const wrap   = document.getElementById('game-wrap');
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
+    const hud = document.getElementById('hud');
     const hudLevel  = document.getElementById('hudLevel');
     const hudDots   = document.getElementById('hudDots');
     const hudStatus = document.getElementById('hudStatus');
@@ -357,6 +358,18 @@
 
     const goHighestVal = document.getElementById('goHighestVal');
 
+    // Overlay state helpers
+    function isOverlayOpen(){
+      return !startOverlay.classList.contains('hidden') ||
+             !endOverlay.classList.contains('hidden') ||
+             !gameOverOverlay.classList.contains('hidden');
+    }
+    function setUiForOverlay(open){
+      hud.classList.toggle('hidden', open);
+      // D-Pad will also be hidden if overlay is open
+      dpad.classList.toggle('hidden', open || !dpadEnabled);
+    }
+
     // D-Pad visibility logic (show on touch/coarse-pointer devices)
     let dpadEnabled = true;
     function shouldShowDpad(){
@@ -366,7 +379,7 @@
     }
     function updateDpadVisibility(){
       dpadEnabled = shouldShowDpad();
-      dpad.classList.toggle('hidden', !dpadEnabled);
+      dpad.classList.toggle('hidden', !dpadEnabled || isOverlayOpen());
     }
 
     // Game State
@@ -393,16 +406,37 @@
     function lerp(a,b,t){return a+(b-a)*t;}
 
     // Start/Restart hooks
-    document.getElementById('startBtn').onclick = () => { startOverlay.classList.add('hidden'); startGame(); };
-    document.getElementById('retryBtn').onclick = () => { gameOverOverlay.classList.add('hidden'); restartSameLevel(); };
-    document.getElementById('changeMazeBtn').onclick = () => { gameOverOverlay.classList.add('hidden'); changeMazeSameLevel(); };
-    document.getElementById('menuBtn').onclick = () => { gameOverOverlay.classList.add('hidden'); showMenu(); };
-    document.getElementById('restartBtn').onclick = () => { endOverlay.classList.add('hidden'); startGame(true); };
+    document.getElementById('startBtn').onclick = () => {
+      startOverlay.classList.add('hidden');
+      setUiForOverlay(false);
+      startGame();
+    };
+    document.getElementById('retryBtn').onclick = () => {
+      gameOverOverlay.classList.add('hidden');
+      setUiForOverlay(false);
+      restartSameLevel();
+    };
+    document.getElementById('changeMazeBtn').onclick = () => {
+      gameOverOverlay.classList.add('hidden');
+      setUiForOverlay(false);
+      changeMazeSameLevel();
+    };
+    document.getElementById('menuBtn').onclick = () => {
+      gameOverOverlay.classList.add('hidden');
+      showMenu();
+    };
+    document.getElementById('restartBtn').onclick = () => {
+      endOverlay.classList.add('hidden');
+      setUiForOverlay(false);
+      startGame(true);
+    };
 
     function showMenu(){
       running=false;
       drawMenuBackdrop();
       startOverlay.classList.remove('hidden');
+      setUiForOverlay(true);
+      updateDpadVisibility();
     }
 
     // Compute big D-Pad size that still fits viewport width
@@ -438,7 +472,7 @@
       const w = window.innerWidth;
 
       // If D-Pad is disabled (desktop), don't reserve space for it
-      const reserveH = dpadEnabled ? (sz.padH + 16) : 0;
+      const reserveH = (!isOverlayOpen() && dpadEnabled) ? (sz.padH + 16) : 0;
 
       const hAvail = Math.max(260, window.innerHeight - reserveH);
       const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
@@ -453,7 +487,7 @@
       canvas.style.top  = `${top}px`;
       canvas.style.left = `${left}px`;
 
-      if(dpadEnabled){
+      if(!isOverlayOpen() && dpadEnabled){
         // Apply D-Pad CSS sizes and position only when visible
         dpad.style.setProperty('--btn', `${sz.btn}px`);
         dpad.style.setProperty('--gap', `${sz.gap}px`);
@@ -476,9 +510,12 @@
     // React if pointer capabilities change (rare but useful on hybrids)
     if (window.matchMedia) {
       const mm = window.matchMedia('(any-pointer: coarse)');
-      if (mm.addEventListener) mm.addEventListener('change', resizeCanvas);
-      else if (mm.addListener) mm.addListener(resizeCanvas);
+      if (mm.addEventListener) mm.addEventListener('change', () => { updateDpadVisibility(); resizeCanvas(); });
+      else if (mm.addListener) mm.addListener(() => { updateDpadVisibility(); resizeCanvas(); });
     }
+
+    // Initial UI state (overlay open -> hide HUD and D-Pad)
+    setUiForOverlay(isOverlayOpen());
     resizeCanvas();
 
     // Input: Keyboard + On-screen D-Pad
@@ -867,6 +904,8 @@
       if(level>MAX_LEVEL){
         running=false;
         endOverlay.classList.remove('hidden');
+        setUiForOverlay(true);
+        updateDpadVisibility();
         return;
       }
       centerText.textContent = `Level ${level}`;
@@ -895,6 +934,8 @@
           // Update highest level display
           goHighestVal.textContent = String(highestLevel);
           gameOverOverlay.classList.remove('hidden');
+          setUiForOverlay(true);
+          updateDpadVisibility();
           return;
         }
       }
@@ -911,7 +952,7 @@
       drawPlayer();
     }
 
-    // Watermark: subtle edge-only strip sweeping S -> N every 7s
+    // Watermark
     function drawSignWatermark(){
       ctx.save();
       const text = 'Sign';
@@ -1014,7 +1055,6 @@
         if(v===4 || v===5 || v===6){
           const cx=(x+0.5)*TILE, cy=(y+0.5)*TILE;
 
-          // light bob and soft glow
           const bob = Math.sin(animT*2.2 + (x+y)) * Math.min(4, TILE*0.12);
           ctx.save();
           ctx.translate(0, -bob);
@@ -1022,7 +1062,6 @@
           ctx.shadowBlur = Math.max(2, TILE*0.25);
 
           if(v===4){
-            // Freeze: snowflake
             ctx.translate(cx,cy);
             const r=TILE*0.30;
             ctx.strokeStyle='rgba(160,220,255,0.98)';
@@ -1033,7 +1072,6 @@
               ctx.beginPath(); ctx.moveTo(0,-r*0.6); ctx.lineTo(r*0.12,-r*0.78); ctx.moveTo(0,-r*0.6); ctx.lineTo(-r*0.12,-r*0.78); ctx.stroke();
             }
           }else if(v===5){
-            // Ghost icon
             ctx.translate(cx,cy);
             const r=TILE*0.34;
             ctx.fillStyle='#ffffff';
@@ -1047,13 +1085,11 @@
             ctx.strokeStyle='rgba(120,190,255,0.9)';
             ctx.lineWidth=Math.max(2,Math.floor(TILE*0.06));
             ctx.stroke();
-            // eyes
             ctx.fillStyle='#0b0b0e';
             const eyeR = Math.max(1, TILE*0.06);
             ctx.beginPath(); ctx.arc(-r*0.25, -r*0.05, eyeR, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(r*0.25, -r*0.05, eyeR, 0, Math.PI*2); ctx.fill();
           }else{
-            // Frenzy: shorter red bolt
             ctx.translate(cx,cy);
             ctx.fillStyle='#ff3a3a';
             ctx.strokeStyle='#ffffff';
@@ -1237,8 +1273,7 @@
       ctx.beginPath(); ctx.arc(px+eyeOff+pdx, eyeY+pdy, r*0.06, 0, Math.PI*2); ctx.fill();
 
       // Mouth
-      const panic = panicAmt>0 && frenzyTimer<=0;
-      if(panic){
+      if(panic && frenzyTimer<=0){
         ctx.fillStyle='#2a0f00';
         ctx.beginPath(); ctx.ellipse(px, py+r*0.26, r*0.18*(1+panicAmt*0.35), r*0.22*(1+panicAmt*0.55), 0, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle='#ffb199';
@@ -1309,7 +1344,6 @@
 
         const x=g.x*TILE, y=g.y*TILE, r=g.radius*TILE;
 
-        // body
         if(frozen){
           const gradI = ctx.createRadialGradient(x-r*0.4,y-r*0.4,r*0.2, x,y,r*1.1);
           gradI.addColorStop(0,'#e3f6ff'); gradI.addColorStop(1,'#7ac6ff');
@@ -1321,7 +1355,6 @@
         }
         ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
 
-        // Mouth: fully closes. If frozen, keep closed (no animation).
         let openness;
         if(frozen){
           openness = 0;
@@ -1343,13 +1376,11 @@
           ctx.beginPath(); ctx.ellipse(mCx,mCy,mRx,mRy,0,0,Math.PI*2); ctx.fill();
         }
 
-        // Angry brows (outer higher -> inner lower)
         ctx.strokeStyle=frozen?'#0f3b5a':'#3b1200';
         ctx.lineWidth=Math.max(2,Math.floor(TILE*0.07));
         ctx.beginPath(); ctx.moveTo(x - r*0.45, y - r*0.28); ctx.lineTo(x - r*0.18, y - r*0.15); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x + r*0.45, y - r*0.28); ctx.lineTo(x + r*0.18, y - r*0.15); ctx.stroke();
 
-        // eyes
         ctx.fillStyle='#ffffff';
         ctx.beginPath(); ctx.ellipse(x-r*0.22, y-r*0.05, r*0.12, r*0.14, 0, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.ellipse(x+r*0.22, y-r*0.05, r*0.12, r*0.14, 0, 0, Math.PI*2); ctx.fill();
@@ -1359,7 +1390,6 @@
         ctx.beginPath(); ctx.arc(x-r*0.22+exShift, y-r*0.05+eyShift, r*0.05, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.arc(x+r*0.22+exShift, y-r*0.05+eyShift, r*0.05, 0, Math.PI*2); ctx.fill();
 
-        // aura pulse ring
         if(!frozen && g.pulse>0){
           const a=g.pulse;
           ctx.strokeStyle=`hsla(${g.auraHue},95%,75%,${0.45*a})`;
