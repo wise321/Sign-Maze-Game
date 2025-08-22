@@ -18,7 +18,7 @@
 
     canvas{background:#000;display:block;max-width:100vw;max-height:100vh;position:absolute}
 
-    /* HUD (desktop/top) */
+    /* HUD */
     #hud{
       position:absolute;left:0;right:0;top:0;padding:8px 12px;
       display:flex;gap:12px;align-items:center;justify-content:space-between;
@@ -32,16 +32,10 @@
     }
     .hud-right{display:flex;gap:8px}
 
-    /* Mobile HUD (repositioned bottom-left of maze) */
-    #hudMobile{
-      position:absolute;
-      z-index:4;
-      pointer-events:none;
-      display:flex;
-      flex-direction:column;
-      gap:6px;
+    /* Hide HUD pills on phone-size touch environments only (keep for desktop and mobile-desktop-site) */
+    @media (max-width: 768px) and (any-pointer: coarse) {
+      #hudLevel, #hudDots, #hudStatus { display:none !important; }
     }
-    #hudMobile .pill{ pointer-events:auto; }
 
     /* Overlays */
     .overlay{
@@ -57,6 +51,25 @@
       border:1px solid rgba(255,122,0,.35);
       border-radius:18px;padding:28px 24px;color:var(--text);
       box-shadow:0 12px 60px rgba(255,122,0,.15), 0 2px 0 rgba(255,255,255,.02) inset
+    }
+
+    /* Larger Game Over card and text on touchscreens for readability */
+    @media (any-pointer: coarse) {
+      #gameOverOverlay .card{
+        width:min(1024px,96vw);
+        padding:34px 26px;
+      }
+      #gameOverOverlay .title{
+        font-size: clamp(34px, 6.8vw, 64px);
+      }
+      #gameOverOverlay .subtitle{
+        font-size: clamp(18px, 4.2vw, 22px);
+        line-height: 1.6;
+      }
+      #gameOverOverlay .btn-row button{
+        font-size: clamp(16px, 4.6vw, 22px);
+        padding: 16px 22px;
+      }
     }
 
     /* Title with depth */
@@ -132,7 +145,7 @@
     }
     .sign-star{
       position:absolute;right:14px;top:10px;width:18px;height:18px;background:conic-gradient(from 0deg,#ffd67a, #fff 40%, #ffd67a);
-      clip-path:polygon(50% 0,60% 38%,100% 50%,60% 62%,50% 100%,40% 62%,0 50%,40 38%);
+      clip-path:polygon(50% 0,60% 38%,100% 50%,60% 62%,50% 100%,40% 62%,0 50%,40% 38%);
       filter:drop-shadow(0 3px 8px rgba(0,0,0,.25))
     }
     .credit{
@@ -207,7 +220,6 @@
   <div id="game-wrap">
     <canvas id="game" aria-label="Sign Orang Dynasty Arcade Maze Game" role="img"></canvas>
 
-    <!-- Desktop/top HUD container -->
     <div id="hud">
       <div class="pill" id="hudLevel">Level 1 / 50</div>
       <div class="hud-right">
@@ -215,9 +227,6 @@
         <div class="pill" id="hudStatus">Ready</div>
       </div>
     </div>
-
-    <!-- Mobile HUD (we dynamically move the same pills into here on mobile) -->
-    <div id="hudMobile" class="hidden"></div>
 
     <div id="centerText"></div>
 
@@ -247,19 +256,19 @@
           Power-ups: 3 per level, spread apart.
         </p>
 
-        <!-- Icon-led power-up list -->
+        <!-- Icon-led power-up list (durations updated +1.75s) -->
         <div class="pu-list">
           <div class="pu-row">
             <span class="pu-icon pu-ice">❄️</span>
-            <div class="pu-text"><span class="pu-em">11s</span> — Enemies freeze; you pass through. Thicker icy aura and snowy sparkles.</div>
+            <div class="pu-text"><span class="pu-em">12.75s</span> — Enemies freeze; you pass through. Thicker icy aura and snowy sparkles.</div>
           </div>
           <div class="pu-row">
             <span class="pu-icon pu-ghost">👻</span>
-            <div class="pu-text"><span class="pu-em">12s</span> — Opaque ghost cloak covers you completely; timing pulse; spooky motes swirl.</div>
+            <div class="pu-text"><span class="pu-em">13.75s</span> — Opaque ghost cloak covers you completely; timing pulse; spooky motes swirl.</div>
           </div>
           <div class="pu-row">
             <span class="pu-icon pu-frenzy">⚡️</span>
-            <div class="pu-text"><span class="pu-em">10s</span> — Chomp enemies; they respawn after 5s. Thick red aura with quick lightning.</div>
+            <div class="pu-text"><span class="pu-em">11.75s</span> — Chomp enemies; they respawn after 5s. Thick red aura with quick lightning.</div>
           </div>
         </div>
 
@@ -274,8 +283,9 @@
     <div id="gameOverOverlay" class="overlay hidden">
       <div class="card">
         <h2 class="title">Game Over</h2>
-        <div class="badge" id="goLevelBadge">Highest Level: 1 / 50</div>
         <p class="subtitle" id="goText">Caught by an enemy! Try again, swap the maze, or return to the main menu.</p>
+        <!-- Highest level indicator -->
+        <p class="subtitle" id="goHighest">Highest level this run: <strong><span id="goHighestVal">1</span></strong></p>
         <div class="btn-row">
           <button id="retryBtn">Restart Level</button>
           <button class="secondary" id="changeMazeBtn">Change Maze</button>
@@ -326,26 +336,26 @@
     const ENEMY_IDLE_SPEED = 1.6;
     const TILE_ASPECT_MARGIN = 0.96;
 
+    // Power-up durations (+1.75s applied)
+    const PU_FREEZE = 12.75;
+    const PU_GHOST  = 13.75;
+    const PU_FRENZY = 11.75;
+
     // DOM
     const wrap   = document.getElementById('game-wrap');
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
-
-    const hud       = document.getElementById('hud');
-    const hudRight  = hud.querySelector('.hud-right');
     const hudLevel  = document.getElementById('hudLevel');
     const hudDots   = document.getElementById('hudDots');
     const hudStatus = document.getElementById('hudStatus');
-
-    const hudMobile = document.getElementById('hudMobile');
-
     const centerText= document.getElementById('centerText');
     const dpad = document.getElementById('dpad');
 
     const startOverlay = document.getElementById('startOverlay');
     const endOverlay   = document.getElementById('endOverlay');
     const gameOverOverlay = document.getElementById('gameOverOverlay');
-    const goLevelBadge = document.getElementById('goLevelBadge');
+
+    const goHighestVal = document.getElementById('goHighestVal');
 
     // D-Pad visibility logic (show on touch/coarse-pointer devices)
     let dpadEnabled = true;
@@ -359,65 +369,19 @@
       dpad.classList.toggle('hidden', !dpadEnabled);
     }
 
-    // Move HUD items to mobile container (bottom-left of maze) or back to top bar
-    function relocateHudItems(){
-      if(dpadEnabled){
-        // Mobile: show bottom-left HUD
-        if(hudMobile.contains(hudLevel) === false){
-          hudMobile.appendChild(hudLevel);
-        }
-        if(hudMobile.contains(hudDots) === false){
-          hudMobile.appendChild(hudDots);
-        }
-        if(hudMobile.contains(hudStatus) === false){
-          hudMobile.appendChild(hudStatus);
-        }
-        hud.classList.add('hidden');
-        hudMobile.classList.remove('hidden');
-        // position after moved
-        requestAnimationFrame(updateMobileHudPosition);
-      }else{
-        // Desktop: restore original layout in header HUD
-        if(hud.contains(hudLevel) === false){
-          hud.insertBefore(hudLevel, hud.firstChild);
-        }
-        if(hudRight.contains(hudDots) === false){
-          hudRight.appendChild(hudDots);
-        }
-        if(hudRight.contains(hudStatus) === false){
-          hudRight.appendChild(hudStatus);
-        }
-        hudMobile.classList.add('hidden');
-        hud.classList.remove('hidden');
-      }
-    }
-
-    function updateMobileHudPosition(){
-      if(!dpadEnabled) return;
-      // Place the mobile HUD right at the left-bottom boundary of the maze (canvas)
-      const left = parseInt(canvas.style.left||'0',10);
-      const top  = parseInt(canvas.style.top||'0',10);
-      const margin = Math.max(6, Math.floor(TILE*0.25));
-      // Measure height to tuck into bottom inside the maze area
-      const h = hudMobile.offsetHeight || 0;
-      hudMobile.style.left = `${left + margin}px`;
-      hudMobile.style.top  = `${top + canvas.height - h - margin}px`;
-    }
-
     // Game State
     let level=1, currentSeed=1, running=false, lastTime=performance.now();
-    let highestLevelReached = 1;
-
     let world=null, player=null, enemies=[], dotsLeft=0, openTiles=[];
     let desiredDir = {x:0,y:0};
     let hasMoved=false;
+    let highestLevel = 1;
 
     // Timers and particles
     let animT = 0;
     let lastCommandMs = performance.now();
-    let freezeTimer = 0;     // 11s
-    let invulnTimer = 0;     // 12s
-    let frenzyTimer = 0;     // 10s
+    let freezeTimer = 0;
+    let invulnTimer = 0;
+    let frenzyTimer = 0;
     let freezeFlakes = [];
     let ghostMotes = [];
 
@@ -503,10 +467,6 @@
         dpad.style.top = `${dpadTop}px`;
         dpad.style.left= `${dpadLeft}px`;
       }
-
-      // Move HUD pills to proper container and position mobile HUD
-      relocateHudItems();
-      updateMobileHudPosition();
     }
     window.addEventListener('resize', resizeCanvas, {passive:true});
     window.addEventListener('orientationchange', resizeCanvas);
@@ -662,7 +622,7 @@
     }
 
     function startGame(resetAll=false){
-      if(resetAll){ level=1; currentSeed=1; highestLevelReached = 1; }
+      if(resetAll){ level=1; currentSeed=1; highestLevel = 1; }
       loadLevel(level, level);
       running = true; lastTime = performance.now(); requestAnimationFrame(loop);
     }
@@ -679,8 +639,6 @@
 
     function loadLevel(n, seedForMaze){
       currentSeed = seedForMaze;
-      highestLevelReached = Math.max(highestLevelReached, n);
-
       const gen = generateMaze(seedForMaze);
       world = gen;
       placePowerups(world);
@@ -716,6 +674,9 @@
       hudStatus.textContent= 'Ready';
       centerText.style.display = 'none';
       gameOverOverlay.classList.add('hidden');
+
+      // Update highest level reached
+      highestLevel = Math.max(highestLevel, n);
 
       // Ensure layout correct after load
       resizeCanvas();
@@ -895,9 +856,9 @@
         if(dotsLeft<=0){ hudStatus.textContent='Level Clear!'; nextLevel(); }
       }else if(v===4 || v===5 || v===6){
         world.grid[cy][cx]=2;
-        if(v===4){ freezeTimer = 11; hudStatus.textContent='Freeze! 11s'; }
-        else if(v===5){ invulnTimer = 12; hudStatus.textContent='Ghost! 12s'; }
-        else { frenzyTimer = 10; hudStatus.textContent='Frenzy! 10s'; }
+        if(v===4){ freezeTimer = PU_FREEZE; hudStatus.textContent=`Freeze! ${PU_FREEZE}s`; }
+        else if(v===5){ invulnTimer = PU_GHOST; hudStatus.textContent=`Ghost! ${PU_GHOST}s`; }
+        else { frenzyTimer = PU_FRENZY; hudStatus.textContent=`Frenzy! ${PU_FRENZY}s`; }
       }
     }
 
@@ -931,8 +892,8 @@
           if(invulnTimer>0 || freezeTimer>0) continue; // pass-through
           running=false;
           hudStatus.textContent = 'Game Over';
-          // Update highest-level indicator on Game Over popup
-          goLevelBadge.textContent = `Highest Level: ${highestLevelReached} / ${MAX_LEVEL}`;
+          // Update highest level display
+          goHighestVal.textContent = String(highestLevel);
           gameOverOverlay.classList.remove('hidden');
           return;
         }
@@ -1137,7 +1098,7 @@
 
       // Freeze aura + flakes
       if(freezeTimer>0){
-        const tNorm = 1 - (freezeTimer/11);
+        const tNorm = 1 - (freezeTimer / PU_FREEZE);
         const speed = lerp(1.2, 12.0, tNorm);
         const rad = r*1.15 + Math.sin(animT*speed)*r*0.1;
         ctx.save();
@@ -1201,7 +1162,7 @@
 
       // Ghost cloak
       if(invulnTimer>0){
-        const tNorm = 1 - (invulnTimer/12);
+        const tNorm = 1 - (invulnTimer / PU_GHOST);
         const pulse = 0.6 + 0.4*Math.sin(animT*lerp(2.0, 9.5, tNorm));
         const dirX = clamp(player.dir.x, -1, 1);
         const sway = (-dirX)*r*0.45 + Math.sin(animT*9.0)*r*0.08;
@@ -1276,7 +1237,8 @@
       ctx.beginPath(); ctx.arc(px+eyeOff+pdx, eyeY+pdy, r*0.06, 0, Math.PI*2); ctx.fill();
 
       // Mouth
-      if(panic && frenzyTimer<=0){
+      const panic = panicAmt>0 && frenzyTimer<=0;
+      if(panic){
         ctx.fillStyle='#2a0f00';
         ctx.beginPath(); ctx.ellipse(px, py+r*0.26, r*0.18*(1+panicAmt*0.35), r*0.22*(1+panicAmt*0.55), 0, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle='#ffb199';
