@@ -20,7 +20,9 @@
 
     /* HUD */
     #hud{
-      position:absolute;left:0;right:0;top:0;padding:8px 12px;
+      position:absolute;left:0;right:0;top:0;
+      /* Add safe-area padding and keep HUD pinned at the absolute top */
+      padding:calc(8px + env(safe-area-inset-top, 0px)) 12px 8px 12px;
       display:flex;gap:12px;align-items:center;justify-content:space-between;
       pointer-events:none;font-weight:600;letter-spacing:.4px;
       text-shadow:0 1px 0 rgba(0,0,0,.3);z-index:4
@@ -46,6 +48,28 @@
       border:1px solid rgba(255,122,0,.35);
       border-radius:18px;padding:28px 24px;color:var(--text);
       box-shadow:0 12px 60px rgba(255,122,0,.15), 0 2px 0 rgba(255,255,255,.02) inset
+    }
+
+    /* Bigger Game Over on mobile and “mobile desktop” widths without affecting PC */
+    @media (max-width: 900px){
+      #gameOverOverlay .card{
+        width:min(820px,96vw);
+        padding:32px 24px;
+      }
+      #gameOverOverlay .title{
+        font-size: clamp(30px, 7.2vw, 42px);
+      }
+      #gameOverOverlay .subtitle{
+        font-size: clamp(15px, 4.2vw, 18px);
+      }
+      #gameOverOverlay .btn-row{
+        gap:12px;
+      }
+      #gameOverOverlay .btn-row button{
+        font-size: clamp(16px, 4.6vw, 20px);
+        padding:14px 20px;
+        border-radius:14px;
+      }
     }
 
     /* Title with depth */
@@ -171,8 +195,9 @@
     }
     .pad{
       display:grid;
-      grid-template-columns:1fr 1fr 1fr;
-      grid-template-rows:1fr 1fr 1fr;
+      /* Use a smaller center track (via --center) on phones; defaults to --btn on desktop */
+      grid-template-columns: var(--btn) var(--center, var(--btn)) var(--btn);
+      grid-template-rows: var(--btn) var(--center, var(--btn)) var(--btn);
       gap: var(--gap,12px);
       width: var(--pad-w,720px);
       height: var(--pad-h,720px);
@@ -190,6 +215,11 @@
     }
     .dpad-btn:active{transform:scale(0.98)}
     .dpad-empty{pointer-events:none;opacity:0}
+
+    /* Slightly tighter D-pad chrome on smaller phones */
+    @media (max-width: 640px){
+      #dpad{ padding:8px; border-radius:14px; }
+    }
   </style>
 </head>
 <body>
@@ -319,6 +349,7 @@
     const hudStatus = document.getElementById('hudStatus');
     const centerText= document.getElementById('centerText');
     const dpad = document.getElementById('dpad');
+    const hud = document.getElementById('hud');
 
     const startOverlay = document.getElementById('startOverlay');
     const endOverlay   = document.getElementById('endOverlay');
@@ -371,27 +402,32 @@
       startOverlay.classList.remove('hidden');
     }
 
-    // Compute big D-Pad size that still fits viewport width
-    function computeDpadSize(){
+    // Compute D-Pad size; compact = phones only (real touch devices)
+    function computeDpadSize(compact=false){
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      let btn = Math.max(96, Math.min(160, Math.min(vw, vh)*0.18));
-      let gap = Math.max(12, Math.floor(btn*0.12));
-      let fs  = Math.floor(btn*0.28);
-      let padW = btn*3 + gap*2;
-      let padH = btn*3 + gap*2;
+      const base = Math.min(vw, vh);
 
-      // If too wide for viewport, scale down proportionally (keep buttons big but fitting)
+      let btn = Math.max(compact?80:96, Math.min(compact?140:160, Math.floor(base*(compact?0.16:0.18))));
+      let gap = Math.max(compact?6:12, Math.floor(btn*(compact?0.08:0.12)));
+      let fs  = Math.max(compact?22:24, Math.floor(btn*(compact?0.26:0.28)));
+      let center = compact ? Math.max(10, Math.floor(btn*0.22)) : btn; // shrink center track on phones
+
+      let padW = btn*2 + center + gap*2;
+      let padH = btn*2 + center + gap*2;
+
+      // If too wide for viewport, scale down proportionally (keep everything fitting)
       const maxW = vw - 16;
       if(padW > maxW){
         const s = maxW / padW;
-        btn = Math.max(72, Math.floor(btn*s));
-        gap = Math.max(10, Math.floor(gap*s));
-        fs  = Math.max(24, Math.floor(fs*s));
-        padW = btn*3 + gap*2;
-        padH = btn*3 + gap*2;
+        btn = Math.max(compact?68:72, Math.floor(btn*s));
+        gap = Math.max(compact?5:10, Math.floor(gap*s));
+        fs  = Math.max(compact?18:24, Math.floor(fs*s));
+        center = compact ? Math.max(10, Math.floor(center*s)) : Math.floor(btn);
+        padW = btn*2 + center + gap*2;
+        padH = btn*2 + center + gap*2;
       }
-      return {btn, gap, fs, padW, padH};
+      return {btn, gap, fs, padW, padH, center};
     }
 
     // Responsive canvas and D-Pad placement
@@ -400,22 +436,31 @@
       // Decide whether to show D-Pad for this environment
       updateDpadVisibility();
 
-      const sz = computeDpadSize();
-      const w = window.innerWidth;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      // Treat "mobile view" as real touch + small viewport to avoid affecting desktop/mobile-desktop
+      const isPhone = dpadEnabled && Math.min(vw, vh) <= 640;
+
+      const sz = computeDpadSize(isPhone);
 
       // If D-Pad is disabled (desktop), don't reserve space for it
       const reserveH = dpadEnabled ? (sz.padH + 16) : 0;
 
-      const hAvail = Math.max(260, window.innerHeight - reserveH);
-      const tileW = Math.floor((w * TILE_ASPECT_MARGIN) / COLS);
+      // On phones, push the maze down below the HUD so it never overlaps
+      const safeTop = isPhone ? (hud.getBoundingClientRect().height + 10) : 0;
+
+      const hAvail = Math.max(260, vh - reserveH - safeTop);
+      const tileW = Math.floor((vw * TILE_ASPECT_MARGIN) / COLS);
       const tileH = Math.floor((hAvail * TILE_ASPECT_MARGIN) / ROWS);
       TILE = Math.max(10, Math.min(tileW, tileH));
 
       canvas.width = COLS * TILE;
       canvas.height= ROWS * TILE;
 
-      const top = Math.max(0, Math.floor((hAvail - canvas.height)/2));
-      const left = Math.floor((w - canvas.width)/2);
+      const topWithinAvail = Math.max(0, Math.floor((hAvail - canvas.height)/2));
+      const top = safeTop + topWithinAvail;
+      const left = Math.floor((vw - canvas.width)/2);
       canvas.style.top  = `${top}px`;
       canvas.style.left = `${left}px`;
 
@@ -426,10 +471,11 @@
         dpad.style.setProperty('--pad-w', `${sz.padW}px`);
         dpad.style.setProperty('--pad-h', `${sz.padH}px`);
         dpad.style.setProperty('--fs', `${sz.fs}px`);
+        dpad.style.setProperty('--center', `${sz.center}px`);
 
         const margin = Math.max(6, Math.floor(TILE*0.25));
         const dpadTop = top + canvas.height + margin;
-        const dpadLeft = Math.max(8, Math.floor((w - sz.padW)/2));
+        const dpadLeft = Math.max(8, Math.floor((vw - sz.padW)/2));
         dpad.style.top = `${dpadTop}px`;
         dpad.style.left= `${dpadLeft}px`;
       }
